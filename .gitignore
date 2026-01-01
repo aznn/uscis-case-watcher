@@ -1,0 +1,16 @@
+# Config with secrets
+config.json
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+
+# Output data
+output/
+
+# OS
+.DS_Store
+
+# IDE
+.claude/

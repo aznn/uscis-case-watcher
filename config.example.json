@@ -1,0 +1,19 @@
+{
+  "accounts": [
+    {
+      "name": "My USCIS Account",
+      "username": "your.email@example.com",
+      "password": "your-password-here",
+      "totp_secret": "ABCD1234EFGH5678IJKL9012MNOP3456",
+      "cases": [
+        {
+          "case_number": "IOE1234567890",
+          "nickname": "My I-485"
+        }
+      ]
+    }
+  ],
+  "browser": {
+    "headless": false
+  }
+}

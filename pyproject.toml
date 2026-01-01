@@ -1,0 +1,13 @@
+[project]
+name = "uscis-watcher"
+version = "0.1.0"
+description = "Monitor USCIS case status and track changes"
+requires-python = ">=3.10"
+dependencies = [
+    "selenium>=4.0.0",
+    "pyotp>=2.8.0",
+    "deepdiff>=6.0.0",
+]
+
+[project.scripts]
+uscis-watcher = "uscis_watcher:main"
