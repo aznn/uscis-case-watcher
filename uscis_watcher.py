@@ -132,6 +132,137 @@ def load_receipt_info(nickname: str) -> Optional[dict]:
         return json.load(f)
 
 
+def save_documents(nickname: str, data: dict) -> Path:
+    """Save the documents data to documents.json"""
+    case_dir = get_case_output_dir(nickname)
+    documents_file = case_dir / "documents.json"
+    with open(documents_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return documents_file
+
+
+def load_documents(nickname: str) -> Optional[dict]:
+    """Load the previous documents data if it exists"""
+    case_dir = get_case_output_dir(nickname)
+    documents_file = case_dir / "documents.json"
+    if not documents_file.exists():
+        return None
+
+    with open(documents_file, "r") as f:
+        return json.load(f)
+
+
+def save_case_status(nickname: str, data: dict) -> Path:
+    """Save the case_status data to case_status.json"""
+    case_dir = get_case_output_dir(nickname)
+    case_status_file = case_dir / "case_status.json"
+    with open(case_status_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return case_status_file
+
+
+def load_case_status(nickname: str) -> Optional[dict]:
+    """Load the previous case_status data if it exists"""
+    case_dir = get_case_output_dir(nickname)
+    case_status_file = case_dir / "case_status.json"
+    if not case_status_file.exists():
+        return None
+
+    with open(case_status_file, "r") as f:
+        return json.load(f)
+
+
+# Registry of data sources with their load/save functions
+DATA_SOURCES = {
+    "case_details": {
+        "load": load_latest,
+        "save": save_latest,
+        "label": "Case details",
+    },
+    "receipt_info": {
+        "load": load_receipt_info,
+        "save": save_receipt_info,
+        "label": "Receipt info",
+    },
+    "documents": {
+        "load": load_documents,
+        "save": save_documents,
+        "label": "Documents",
+    },
+    "case_status": {
+        "load": load_case_status,
+        "save": save_case_status,
+        "label": "Case status",
+    },
+}
+
+
+def process_data_source(
+    source_key: str,
+    nickname: str,
+    case_number: str,
+    new_data: dict,
+    dry_run: bool = False,
+) -> tuple[bool, Optional[dict]]:
+    """
+    Process a single data source: compare with old data, detect changes, save, and log.
+    Returns (has_changes, diff).
+    """
+    source = DATA_SOURCES[source_key]
+    label = source["label"]
+    load_fn = source["load"]
+    save_fn = source["save"]
+
+    old_data = load_fn(nickname)
+    has_changes = False
+    diff = None
+
+    if old_data:
+        diff = DeepDiff(old_data, new_data, ignore_order=True)
+        if diff:
+            has_changes = True
+            # Special handling for case_details (main case data)
+            if source_key == "case_details":
+                print_change_alert(nickname, case_number, diff, old_data, new_data)
+                if not dry_run:
+                    changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
+                    print(f"  Changelog updated: {changelog_path}")
+            # Special handling for receipt_info (show location change)
+            elif source_key == "receipt_info":
+                old_loc = old_data.get("data", {}).get("receipt_details", {}).get("location") if old_data.get("data") else None
+                new_loc = new_data.get("data", {}).get("receipt_details", {}).get("location") if new_data.get("data") else None
+                if old_loc != new_loc:
+                    print(f"  {nickname}: {label} location changed: {old_loc} -> {new_loc}")
+                else:
+                    print(f"  {nickname}: {label} changed")
+                if not dry_run:
+                    append_changelog(nickname, case_number, diff, old_data, new_data)
+            else:
+                print(f"  {nickname}: {label} changed")
+                if not dry_run:
+                    append_changelog(nickname, case_number, diff, old_data, new_data)
+        elif source_key == "case_details":
+            # Only print "no changes" for main case data
+            print(f"  {nickname}: No changes")
+    else:
+        # First time recording this data source
+        has_changes = True
+        if source_key == "case_details":
+            print(f"  {nickname}: First run - recording initial data")
+            if not dry_run:
+                create_initial_changelog(nickname, case_number, new_data)
+        elif source_key == "receipt_info":
+            loc = new_data.get("data", {}).get("receipt_details", {}).get("location") if new_data.get("data") else None
+            if loc:
+                print(f"  {nickname}: {label} recorded (location: {loc})")
+        elif new_data.get("data"):
+            print(f"  {nickname}: {label} recorded")
+
+    # Save the new data
+    if not dry_run:
+        save_fn(nickname, new_data)
+
+    return has_changes, diff
 
 
 def format_diff(diff: dict, old_data: dict, new_data: dict) -> str:
@@ -413,83 +544,74 @@ class USCISWatcher:
 
         self.log("Login successful!")
 
-    def fetch_case_details(self, case_number: str) -> dict:
-        """Fetch case details from the USCIS API"""
+    def fetch_all_case_data(self, case_number: str) -> dict:
+        """Fetch all case data from multiple APIs in parallel"""
         if not self.driver:
             self.login()
 
-        api_url = f"https://my.uscis.gov/account/case-service/api/cases/{case_number}"
+        # Define all API endpoints
+        apis = {
+            "case_details": f"https://my.uscis.gov/account/case-service/api/cases/{case_number}",
+            "receipt_info": f"https://my.uscis.gov/secure-messaging/api/case-service/receipt_info/{case_number}",
+            "documents": f"https://my.uscis.gov/account/case-service/api/cases/{case_number}/documents",
+            "case_status": f"https://my.uscis.gov/account/case-service/api/case_status/{case_number}",
+        }
 
-        # Execute the fetch and wait for response using execute_async_script
+        # Build the JavaScript for parallel fetching
+        api_entries = ", ".join([f'["{key}", "{url}"]' for key, url in apis.items()])
+
         result = self.driver.execute_async_script(f"""
             var callback = arguments[arguments.length - 1];
-            fetch('{api_url}', {{
-                method: 'GET',
-                credentials: 'include'
-            }})
-            .then(response => {{
-                return response.text().then(text => ({{
+            var apis = [{api_entries}];
+
+            Promise.all(apis.map(([key, url]) =>
+                fetch(url, {{
+                    method: 'GET',
+                    credentials: 'include'
+                }})
+                .then(response => response.text().then(text => ({{
+                    key: key,
                     status: response.status,
-                    statusText: response.statusText,
                     body: text
-                }}));
+                }})))
+                .catch(error => ({{
+                    key: key,
+                    error: error.message
+                }}))
+            ))
+            .then(results => {{
+                var output = {{}};
+                results.forEach(r => {{
+                    output[r.key] = r;
+                }});
+                callback(JSON.stringify(output));
             }})
-            .then(data => callback(JSON.stringify(data)))
             .catch(error => callback(JSON.stringify({{"error": error.message}})));
         """)
 
-        if result:
-            response_data = json.loads(result)
-            if "error" in response_data:
-                print(f"  ERROR [{case_number}]: {response_data['error']}")
-                raise Exception(f"Fetch error: {response_data['error']}")
-            if response_data.get("status") != 200:
-                print(f"  ERROR [{case_number}]: Status {response_data.get('status')}")
-                raise Exception(f"API returned status {response_data.get('status')}")
-            # Parse the body as JSON
-            return json.loads(response_data["body"])
-        else:
-            print(f"  ERROR [{case_number}]: No response received")
-            raise Exception(f"Failed to fetch case details for {case_number}")
+        if not result:
+            raise Exception(f"Failed to fetch case data for {case_number}")
 
-    def fetch_receipt_info(self, case_number: str) -> dict:
-        """Fetch receipt info from the USCIS secure-messaging API"""
-        if not self.driver:
-            self.login()
+        raw_results = json.loads(result)
+        if "error" in raw_results:
+            raise Exception(f"Fetch error: {raw_results['error']}")
 
-        api_url = f"https://my.uscis.gov/secure-messaging/api/case-service/receipt_info/{case_number}"
+        # Process each API result
+        processed = {}
+        for key, data in raw_results.items():
+            if "error" in data:
+                self.log(f"{key} error [{case_number}]: {data['error']}")
+                processed[key] = {"data": None, "error": data['error']}
+            elif data.get("status") != 200:
+                self.log(f"{key} status [{case_number}]: {data.get('status')}")
+                processed[key] = {"data": None, "error": f"Status {data.get('status')}"}
+            else:
+                try:
+                    processed[key] = json.loads(data["body"])
+                except json.JSONDecodeError:
+                    processed[key] = {"data": None, "error": "Invalid JSON response"}
 
-        # Execute the fetch and wait for response using execute_async_script
-        result = self.driver.execute_async_script(f"""
-            var callback = arguments[arguments.length - 1];
-            fetch('{api_url}', {{
-                method: 'GET',
-                credentials: 'include'
-            }})
-            .then(response => {{
-                return response.text().then(text => ({{
-                    status: response.status,
-                    statusText: response.statusText,
-                    body: text
-                }}));
-            }})
-            .then(data => callback(JSON.stringify(data)))
-            .catch(error => callback(JSON.stringify({{"error": error.message}})));
-        """)
-
-        if result:
-            response_data = json.loads(result)
-            if "error" in response_data:
-                self.log(f"Receipt info error [{case_number}]: {response_data['error']}")
-                return {"data": None, "error": response_data['error']}
-            if response_data.get("status") != 200:
-                self.log(f"Receipt info status [{case_number}]: {response_data.get('status')}")
-                return {"data": None, "error": f"Status {response_data.get('status')}"}
-            # Parse the body as JSON
-            return json.loads(response_data["body"])
-        else:
-            self.log(f"Receipt info no response [{case_number}]")
-            return {"data": None, "error": "No response received"}
+        return processed
 
     def process_all_cases(self, dry_run: bool = False) -> tuple[int, set[str]]:
         """Process all cases for this account. Returns (number of changes, set of changed nicknames)."""
@@ -508,60 +630,26 @@ class USCISWatcher:
             nickname = case["nickname"]
 
             try:
-                # Fetch case details
-                new_data = self.fetch_case_details(case_number)
+                # Fetch all case data in parallel
+                all_data = self.fetch_all_case_data(case_number)
 
-                # Load previous data for comparison
-                old_data = load_latest(nickname)
+                case_has_changes = False
 
-                if old_data:
-                    # Compare with previous data
-                    diff = DeepDiff(old_data, new_data, ignore_order=True)
+                # Process each data source using the common helper
+                for source_key in DATA_SOURCES:
+                    new_data = all_data.get(source_key, {})
+                    has_changes, diff = process_data_source(
+                        source_key, nickname, case_number, new_data, dry_run
+                    )
+                    if has_changes:
+                        case_has_changes = True
+                        # Count main case_details changes for the summary
+                        if source_key == "case_details" and diff:
+                            changes_detected += 1
 
-                    if diff:
-                        changes_detected += 1
-                        changed_nicknames.add(slugify(nickname))
-                        print_change_alert(nickname, case_number, diff, old_data, new_data)
-                        if not dry_run:
-                            changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
-                            print(f"  Changelog updated: {changelog_path}")
-                    else:
-                        print(f"  {nickname}: No changes")
-                else:
-                    print(f"  {nickname}: First run - recording initial data")
+                # Track changed nicknames
+                if case_has_changes:
                     changed_nicknames.add(slugify(nickname))
-                    if not dry_run:
-                        create_initial_changelog(nickname, case_number, new_data)
-
-                # Save new data as latest
-                if not dry_run:
-                    save_latest(nickname, new_data)
-
-                # Fetch and track receipt_info
-                new_receipt_info = self.fetch_receipt_info(case_number)
-                old_receipt_info = load_receipt_info(nickname)
-
-                if old_receipt_info:
-                    # Compare receipt_info data
-                    receipt_diff = DeepDiff(old_receipt_info, new_receipt_info, ignore_order=True)
-                    if receipt_diff:
-                        # Extract location for summary
-                        old_location = old_receipt_info.get("data", {}).get("receipt_details", {}).get("location") if old_receipt_info.get("data") else None
-                        new_location = new_receipt_info.get("data", {}).get("receipt_details", {}).get("location") if new_receipt_info.get("data") else None
-                        if old_location != new_location:
-                            print(f"  {nickname}: Receipt info location changed: {old_location} -> {new_location}")
-                        else:
-                            print(f"  {nickname}: Receipt info changed")
-                        changed_nicknames.add(slugify(nickname))
-                else:
-                    # First time fetching receipt_info
-                    location = new_receipt_info.get("data", {}).get("receipt_details", {}).get("location") if new_receipt_info.get("data") else None
-                    if location:
-                        print(f"  {nickname}: Receipt info recorded (location: {location})")
-
-                # Save receipt_info
-                if not dry_run:
-                    save_receipt_info(nickname, new_receipt_info)
 
             except Exception as e:
                 print(f"  {nickname}: ERROR - {e}")
