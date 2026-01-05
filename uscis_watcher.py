@@ -112,6 +112,28 @@ def load_latest(nickname: str) -> Optional[dict]:
         return json.load(f)
 
 
+def save_receipt_info(nickname: str, data: dict) -> Path:
+    """Save the receipt_info data to receipt_info.json"""
+    case_dir = get_case_output_dir(nickname)
+    receipt_info_file = case_dir / "receipt_info.json"
+    with open(receipt_info_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return receipt_info_file
+
+
+def load_receipt_info(nickname: str) -> Optional[dict]:
+    """Load the previous receipt_info data if it exists"""
+    case_dir = get_case_output_dir(nickname)
+    receipt_info_file = case_dir / "receipt_info.json"
+    if not receipt_info_file.exists():
+        return None
+
+    with open(receipt_info_file, "r") as f:
+        return json.load(f)
+
+
+
+
 def format_diff(diff: dict, old_data: dict, new_data: dict) -> str:
     """Format a DeepDiff result into a readable markdown string"""
     lines = []
@@ -430,6 +452,45 @@ class USCISWatcher:
             print(f"  ERROR [{case_number}]: No response received")
             raise Exception(f"Failed to fetch case details for {case_number}")
 
+    def fetch_receipt_info(self, case_number: str) -> dict:
+        """Fetch receipt info from the USCIS secure-messaging API"""
+        if not self.driver:
+            self.login()
+
+        api_url = f"https://my.uscis.gov/secure-messaging/api/case-service/receipt_info/{case_number}"
+
+        # Execute the fetch and wait for response using execute_async_script
+        result = self.driver.execute_async_script(f"""
+            var callback = arguments[arguments.length - 1];
+            fetch('{api_url}', {{
+                method: 'GET',
+                credentials: 'include'
+            }})
+            .then(response => {{
+                return response.text().then(text => ({{
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: text
+                }}));
+            }})
+            .then(data => callback(JSON.stringify(data)))
+            .catch(error => callback(JSON.stringify({{"error": error.message}})));
+        """)
+
+        if result:
+            response_data = json.loads(result)
+            if "error" in response_data:
+                self.log(f"Receipt info error [{case_number}]: {response_data['error']}")
+                return {"data": None, "error": response_data['error']}
+            if response_data.get("status") != 200:
+                self.log(f"Receipt info status [{case_number}]: {response_data.get('status')}")
+                return {"data": None, "error": f"Status {response_data.get('status')}"}
+            # Parse the body as JSON
+            return json.loads(response_data["body"])
+        else:
+            self.log(f"Receipt info no response [{case_number}]")
+            return {"data": None, "error": "No response received"}
+
     def process_all_cases(self, dry_run: bool = False) -> tuple[int, set[str]]:
         """Process all cases for this account. Returns (number of changes, set of changed nicknames)."""
         self.login()
@@ -475,6 +536,32 @@ class USCISWatcher:
                 # Save new data as latest
                 if not dry_run:
                     save_latest(nickname, new_data)
+
+                # Fetch and track receipt_info
+                new_receipt_info = self.fetch_receipt_info(case_number)
+                old_receipt_info = load_receipt_info(nickname)
+
+                if old_receipt_info:
+                    # Compare receipt_info data
+                    receipt_diff = DeepDiff(old_receipt_info, new_receipt_info, ignore_order=True)
+                    if receipt_diff:
+                        # Extract location for summary
+                        old_location = old_receipt_info.get("data", {}).get("receipt_details", {}).get("location") if old_receipt_info.get("data") else None
+                        new_location = new_receipt_info.get("data", {}).get("receipt_details", {}).get("location") if new_receipt_info.get("data") else None
+                        if old_location != new_location:
+                            print(f"  {nickname}: Receipt info location changed: {old_location} -> {new_location}")
+                        else:
+                            print(f"  {nickname}: Receipt info changed")
+                        changed_nicknames.add(slugify(nickname))
+                else:
+                    # First time fetching receipt_info
+                    location = new_receipt_info.get("data", {}).get("receipt_details", {}).get("location") if new_receipt_info.get("data") else None
+                    if location:
+                        print(f"  {nickname}: Receipt info recorded (location: {location})")
+
+                # Save receipt_info
+                if not dry_run:
+                    save_receipt_info(nickname, new_receipt_info)
 
             except Exception as e:
                 print(f"  {nickname}: ERROR - {e}")

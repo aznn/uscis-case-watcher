@@ -53,6 +53,20 @@ def get_last_event_time(events: list) -> str:
     return get_time_ago(timestamp)
 
 
+def load_receipt_info(folder: Path) -> dict | None:
+    """Load receipt_info.json from a folder if it exists."""
+    receipt_info_path = folder / "receipt_info.json"
+    if not receipt_info_path.exists():
+        return None
+
+    try:
+        with open(receipt_info_path) as f:
+            data = json.load(f)
+        return data.get("data", {}).get("receipt_details", {}) if data.get("data") else None
+    except Exception:
+        return None
+
+
 def load_all_receipts() -> list[dict]:
     """Load all receipts from output folders."""
     receipts = []
@@ -71,6 +85,10 @@ def load_all_receipts() -> list[dict]:
 
             if data.get("data"):
                 receipt = {"nickname": folder.name, **data["data"]}
+                # Load receipt_info for location
+                receipt_info = load_receipt_info(folder)
+                if receipt_info:
+                    receipt["receipt_info"] = receipt_info
                 receipts.append(receipt)
         except Exception as e:
             print(f"Error reading {latest_path}: {e}")
@@ -93,36 +111,38 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: set[str
     RESET = "\033[0m"
 
     print()
-    print("=" * 79)
+    print("=" * 87)
     form_name = receipts[0].get("formName", "") if receipts else ""
     print(f"  {form_type} - {form_name}")
-    print("=" * 79)
+    print("=" * 87)
 
     # Table header
-    headers = ["Nickname", "FTA0-1", "FTA0-2", "FTA0-3", "FTA0-4", "Last Event", "Last Updated"]
-    col_widths = [15, 8, 8, 8, 8, 16, 16]
+    headers = ["Nickname", "Loc", "FTA0-1", "FTA0-2", "FTA0-3", "FTA0-4", "Last Event", "Last Updated"]
+    col_widths = [15, 6, 8, 8, 8, 8, 16, 16]
 
     header_line = "".join(h.ljust(w) for h, w in zip(headers, col_widths))
     print(header_line)
-    print("-" * 79)
+    print("-" * 87)
 
     # Table rows
     for receipt in receipts:
         fta0_count = count_fta0_events(receipt.get("events", []))
         last_event = get_last_event_time(receipt.get("events", []))
         time_ago = get_time_ago(receipt.get("updatedAtTimestamp", ""))
+        location = receipt.get("receipt_info", {}).get("location", "-") if receipt.get("receipt_info") else "-"
 
         check = "[x]"
         empty = " · "
 
         row = [
             receipt["nickname"].ljust(col_widths[0]),
-            (check if fta0_count >= 1 else empty).ljust(col_widths[1]),
-            (check if fta0_count >= 2 else empty).ljust(col_widths[2]),
-            (check if fta0_count >= 3 else empty).ljust(col_widths[3]),
-            (check if fta0_count >= 4 else empty).ljust(col_widths[4]),
-            last_event.ljust(col_widths[5]),
-            time_ago.ljust(col_widths[6]),
+            location.ljust(col_widths[1]),
+            (check if fta0_count >= 1 else empty).ljust(col_widths[2]),
+            (check if fta0_count >= 2 else empty).ljust(col_widths[3]),
+            (check if fta0_count >= 3 else empty).ljust(col_widths[4]),
+            (check if fta0_count >= 4 else empty).ljust(col_widths[5]),
+            last_event.ljust(col_widths[6]),
+            time_ago.ljust(col_widths[7]),
         ]
 
         row_str = "".join(row)
