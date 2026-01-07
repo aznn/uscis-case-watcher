@@ -7,6 +7,7 @@ Supports multiple accounts and cases.
 
 import argparse
 import copy
+import difflib
 import json
 import time
 from datetime import datetime
@@ -265,6 +266,26 @@ def process_data_source(
     return has_changes, diff
 
 
+def format_json_delta(old_data: dict, new_data: dict) -> str:
+    """Format a JSON delta showing added (+) and removed (-) lines"""
+    old_lines = json.dumps(old_data, indent=2).splitlines()
+    new_lines = json.dumps(new_data, indent=2).splitlines()
+
+    differ = difflib.unified_diff(old_lines, new_lines, lineterm='')
+
+    delta_lines = []
+    for line in differ:
+        # Skip the --- and +++ header lines
+        if line.startswith('---') or line.startswith('+++'):
+            continue
+        # Skip the @@ hunk headers
+        if line.startswith('@@'):
+            continue
+        delta_lines.append(line)
+
+    return "\n".join(delta_lines) if delta_lines else ""
+
+
 def format_diff(diff: dict, old_data: dict, new_data: dict) -> str:
     """Format a DeepDiff result into a readable markdown string"""
     lines = []
@@ -291,10 +312,19 @@ def format_diff(diff: dict, old_data: dict, new_data: dict) -> str:
         for path, value in diff["iterable_item_removed"].items():
             lines.append(f"- **Removed item** {path}: `{value}`")
 
+    # Add JSON delta section
+    json_delta = format_json_delta(old_data, new_data)
+    if json_delta:
+        lines.append("")
+        lines.append("**JSON Delta:**")
+        lines.append("```diff")
+        lines.append(json_delta)
+        lines.append("```")
+
     return "\n".join(lines) if lines else "No specific changes detected"
 
 
-def format_diff_console(diff: dict) -> str:
+def format_diff_console(diff: dict, old_data: dict = None, new_data: dict = None) -> str:
     """Format a DeepDiff result for console output"""
     lines = []
 
@@ -325,6 +355,15 @@ def format_diff_console(diff: dict) -> str:
         for path, value in diff["iterable_item_removed"].items():
             clean_path = path.replace("root['data']", "").replace("['", ".").replace("']", "").lstrip(".")
             lines.append(f"    - Removed item from {clean_path}")
+
+    # Add JSON delta if old and new data are provided
+    if old_data is not None and new_data is not None:
+        json_delta = format_json_delta(old_data, new_data)
+        if json_delta:
+            lines.append("")
+            lines.append("    JSON Delta:")
+            for delta_line in json_delta.splitlines():
+                lines.append(f"    {delta_line}")
 
     return "\n".join(lines) if lines else "    (details unavailable)"
 
@@ -458,7 +497,7 @@ def print_change_alert(nickname: str, case_number: str, diff: dict, old_data: di
                 print(f"    -> {msg}")
 
     print("\n  Details:")
-    print(format_diff_console(diff))
+    print(format_diff_console(diff, old_data, new_data))
     print("\n" + "!" * 60)
     print("!" * 60 + "\n")
 
