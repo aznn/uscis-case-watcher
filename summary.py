@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import defaultdict
+from typing import Optional
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 
@@ -36,9 +37,49 @@ def get_time_ago(timestamp: str) -> str:
         return "just now"
 
 
-def count_fta0_events(events: list) -> int:
-    """Count the number of FTA0 events."""
-    return sum(1 for e in events if e.get("eventCode") == "FTA0")
+def has_event_code(events: list, event_code: str) -> bool:
+    """Check if there's an event with the given event code."""
+    return any(e.get("eventCode") == event_code for e in events)
+
+
+def get_earliest_event_timestamp(receipts: list[dict], event_code: str) -> str:
+    """Get the earliest eventTimestamp for a given event code across all receipts."""
+    timestamps = []
+    for receipt in receipts:
+        events = receipt.get("events", [])
+        for event in events:
+            if event.get("eventCode") == event_code:
+                timestamp = event.get("eventTimestamp")
+                if timestamp:
+                    timestamps.append(timestamp)
+
+    return min(timestamps) if timestamps else ""
+
+
+def collect_dynamic_event_codes(receipts: list[dict]) -> list[str]:
+    """Collect all unique event codes from all receipts, sorted by earliest occurrence.
+
+    Returns a list of event codes in chronological order, excluding IAF which is handled separately.
+    """
+    # Collect all unique event codes
+    event_codes = set()
+    for receipt in receipts:
+        events = receipt.get("events", [])
+        for event in events:
+            code = event.get("eventCode")
+            if code and code != "IAF":  # Exclude IAF as it's fixed
+                event_codes.add(code)
+
+    # Sort by earliest timestamp
+    event_codes_with_time = [
+        (code, get_earliest_event_timestamp(receipts, code))
+        for code in event_codes
+    ]
+
+    # Sort by timestamp
+    event_codes_with_time.sort(key=lambda x: x[1])
+
+    return [code for code, _ in event_codes_with_time]
 
 
 def get_last_event_time(events: list) -> str:
@@ -53,7 +94,7 @@ def get_last_event_time(events: list) -> str:
     return get_time_ago(timestamp)
 
 
-def load_receipt_info(folder: Path) -> dict | None:
+def load_receipt_info(folder: Path) -> Optional[dict]:
     """Load receipt_info.json from a folder if it exists."""
     receipt_info_path = folder / "receipt_info.json"
     if not receipt_info_path.exists():
@@ -104,46 +145,67 @@ def group_by_form_type(receipts: list[dict]) -> dict[str, list[dict]]:
     return dict(groups)
 
 
-def print_table(form_type: str, receipts: list[dict], changed_nicknames: set[str] | None = None) -> None:
+def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optional[set[str]] = None) -> None:
     """Print a table for a specific form type."""
     # ANSI color codes
     RED = "\033[91m"
     RESET = "\033[0m"
 
+    # Collect dynamic event codes
+    dynamic_event_codes = collect_dynamic_event_codes(receipts)
+
+    # Build headers: Nickname, Loc, IAF, [dynamic event codes], Last Event, Last Updated
+    headers = ["Nickname", "Loc", "IAF"] + dynamic_event_codes + ["Last Event", "Last Updated"]
+
+    # Calculate column widths
+    nickname_width = 15
+    loc_width = 6
+    iaf_width = 6
+    event_col_width = 6  # Width for each event column
+    last_event_width = 16
+    last_updated_width = 16
+
+    col_widths = [nickname_width, loc_width, iaf_width] + [event_col_width] * len(dynamic_event_codes) + [last_event_width, last_updated_width]
+
+    total_width = sum(col_widths)
+
     print()
-    print("=" * 87)
+    print("=" * total_width)
     form_name = receipts[0].get("formName", "") if receipts else ""
     print(f"  {form_type} - {form_name}")
-    print("=" * 87)
+    print("=" * total_width)
 
     # Table header
-    headers = ["Nickname", "Loc", "FTA0-1", "FTA0-2", "FTA0-3", "FTA0-4", "Last Event", "Last Updated"]
-    col_widths = [15, 6, 8, 8, 8, 8, 16, 16]
-
     header_line = "".join(h.ljust(w) for h, w in zip(headers, col_widths))
     print(header_line)
-    print("-" * 87)
+    print("-" * total_width)
 
     # Table rows
     for receipt in receipts:
-        fta0_count = count_fta0_events(receipt.get("events", []))
-        last_event = get_last_event_time(receipt.get("events", []))
+        events = receipt.get("events", [])
+        last_event = get_last_event_time(events)
         time_ago = get_time_ago(receipt.get("updatedAtTimestamp", ""))
         location = receipt.get("receipt_info", {}).get("location", "-") if receipt.get("receipt_info") else "-"
 
         check = "[x]"
         empty = " · "
 
+        # Build row
         row = [
             receipt["nickname"].ljust(col_widths[0]),
             location.ljust(col_widths[1]),
-            (check if fta0_count >= 1 else empty).ljust(col_widths[2]),
-            (check if fta0_count >= 2 else empty).ljust(col_widths[3]),
-            (check if fta0_count >= 3 else empty).ljust(col_widths[4]),
-            (check if fta0_count >= 4 else empty).ljust(col_widths[5]),
-            last_event.ljust(col_widths[6]),
-            time_ago.ljust(col_widths[7]),
+            (check if has_event_code(events, "IAF") else empty).ljust(col_widths[2]),
         ]
+
+        # Add dynamic event columns
+        for i, event_code in enumerate(dynamic_event_codes):
+            col_idx = 3 + i
+            has_event = has_event_code(events, event_code)
+            row.append((check if has_event else empty).ljust(col_widths[col_idx]))
+
+        # Add last event and last updated columns
+        row.append(last_event.ljust(col_widths[-2]))
+        row.append(time_ago.ljust(col_widths[-1]))
 
         row_str = "".join(row)
 
@@ -154,7 +216,7 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: set[str
             print(row_str)
 
 
-def print_summary(changed_nicknames: set[str] | None = None) -> None:
+def print_summary(changed_nicknames: Optional[set[str]] = None) -> None:
     """Print the summary tables, optionally highlighting changed nicknames."""
     print("\nUSCIS Receipt Summary")
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
