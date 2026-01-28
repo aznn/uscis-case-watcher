@@ -173,6 +173,69 @@ def load_case_status(nickname: str) -> Optional[dict]:
         return json.load(f)
 
 
+def load_silent_updates(nickname: str) -> list[str]:
+    """Load silent update timestamps from silent_updates.json"""
+    case_dir = get_case_output_dir(nickname)
+    silent_updates_file = case_dir / "silent_updates.json"
+    if not silent_updates_file.exists():
+        return []
+
+    with open(silent_updates_file, "r") as f:
+        data = json.load(f)
+        return data.get("silent_updates", [])
+
+
+def save_silent_update(nickname: str, timestamp: str) -> Path:
+    """Append a new silent update timestamp to silent_updates.json"""
+    case_dir = get_case_output_dir(nickname)
+    silent_updates_file = case_dir / "silent_updates.json"
+
+    # Load existing silent updates
+    silent_updates = load_silent_updates(nickname)
+
+    # Add new timestamp (with current time)
+    silent_updates.append(timestamp)
+
+    # Save back
+    data = {"silent_updates": silent_updates}
+    with open(silent_updates_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+    return silent_updates_file
+
+
+def is_silent_update(diff: dict) -> bool:
+    """
+    Check if a diff represents a silent update.
+    A silent update is when ONLY updatedAt and/or updatedAtTimestamp changed.
+    """
+    if not diff:
+        return False
+
+    # Check values_changed
+    if "values_changed" in diff:
+        for path in diff["values_changed"].keys():
+            # Allow only changes to updatedAt or updatedAtTimestamp
+            if "['updatedAt']" not in path and "['updatedAtTimestamp']" not in path:
+                return False
+
+    # No other change types allowed (additions, removals, etc.)
+    # Exception: Allow error field changes (artifact of API response format)
+    for key in diff.keys():
+        if key == "values_changed":
+            continue
+        if key in ["dictionary_item_added", "dictionary_item_removed"]:
+            # Check if only error field is being added/removed
+            for path in diff[key]:
+                if "['error']" not in path:
+                    return False
+        else:
+            # Any other diff type means it's not a silent update
+            return False
+
+    return True
+
+
 # Registry of data sources with their load/save functions
 DATA_SOURCES = {
     "case_details": {
@@ -224,10 +287,21 @@ def process_data_source(
             has_changes = True
             # Special handling for case_details (main case data)
             if source_key == "case_details":
-                print_change_alert(nickname, case_number, diff, old_data, new_data)
-                if not dry_run:
-                    changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
-                    print(f"  Changelog updated: {changelog_path}")
+                # Check if this is a silent update
+                if is_silent_update(diff):
+                    print(f"  {nickname}: Silent update detected (updatedAt timestamp changed)")
+                    if not dry_run:
+                        # Save silent update timestamp
+                        timestamp = datetime.now().isoformat() + "Z"
+                        save_silent_update(nickname, timestamp)
+                        # Still log to changelog
+                        changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
+                else:
+                    # Normal change - alert and log
+                    print_change_alert(nickname, case_number, diff, old_data, new_data)
+                    if not dry_run:
+                        changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
+                        print(f"  Changelog updated: {changelog_path}")
             # Special handling for receipt_info (show location change)
             elif source_key == "receipt_info":
                 old_loc = old_data.get("data", {}).get("receipt_details", {}).get("location") if old_data.get("data") else None
