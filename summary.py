@@ -142,6 +142,12 @@ def get_date_from_timestamp(timestamp: str) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
+def get_short_date(timestamp: str) -> str:
+    """Extract short date (M/D) from ISO timestamp."""
+    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    return f"{dt.month}/{dt.day}"
+
+
 def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
     """
     Build a chronological timeline grouped by (event_code, date) or (silent, date).
@@ -336,7 +342,7 @@ def group_by_form_type(receipts: list[dict]) -> dict[str, list[dict]]:
     return dict(groups)
 
 
-def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optional[set[str]] = None, days_since_filing: bool = False) -> None:
+def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optional[set[str]] = None, days_since_filing: bool = False, show_dates: bool = False) -> None:
     """Print a table for a specific form type."""
     # ANSI color codes
     RED = "\033[91m"
@@ -460,11 +466,13 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
                 # Fill in columns (up to 'count' columns)
                 for i in range(count):
                     if i < len(receipt_events):
-                        if days_since_filing and iaf_timestamp:
-                            days = get_days_between(iaf_timestamp, receipt_events[i])
+                        if show_dates:
+                            cell = get_short_date(receipt_events[i])
+                        elif days_since_filing and iaf_timestamp:
+                            cell = f"{get_days_between(iaf_timestamp, receipt_events[i])}d"
                         else:
-                            days = get_days_since(receipt_events[i])
-                        row.append(f"{days}d".ljust(col_widths[col_idx]))
+                            cell = f"{get_days_since(receipt_events[i])}d"
+                        row.append(cell.ljust(col_widths[col_idx]))
                     else:
                         row.append("·".ljust(col_widths[col_idx]))
                     col_idx += 1
@@ -475,11 +483,13 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
                 # Fill in columns (up to 'count' columns)
                 for i in range(count):
                     if i < len(receipt_silent):
-                        if days_since_filing and iaf_timestamp:
-                            days = get_days_between(iaf_timestamp, receipt_silent[i])
+                        if show_dates:
+                            cell = get_short_date(receipt_silent[i])
+                        elif days_since_filing and iaf_timestamp:
+                            cell = f"{get_days_between(iaf_timestamp, receipt_silent[i])}d"
                         else:
-                            days = get_days_since(receipt_silent[i])
-                        row.append(f"{days}d".ljust(col_widths[col_idx]))
+                            cell = f"{get_days_since(receipt_silent[i])}d"
+                        row.append(cell.ljust(col_widths[col_idx]))
                     else:
                         row.append("·".ljust(col_widths[col_idx]))
                     col_idx += 1
@@ -495,7 +505,7 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
             print(row_str)
 
 
-def print_summary(changed_nicknames: Optional[set[str]] = None, anon: bool = False, days_since_filing: bool = False) -> None:
+def print_summary(changed_nicknames: Optional[set[str]] = None, anon: bool = False, days_since_filing: bool = False, show_dates: bool = False) -> None:
     """Print the summary tables, optionally highlighting changed nicknames."""
     print("\nUSCIS Receipt Summary")
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -515,7 +525,7 @@ def print_summary(changed_nicknames: Optional[set[str]] = None, anon: bool = Fal
     for form_type in form_types:
         # Sort receipts by nickname within each group
         grouped[form_type].sort(key=lambda r: r["nickname"])
-        print_table(form_type, grouped[form_type], changed_nicknames, days_since_filing)
+        print_table(form_type, grouped[form_type], changed_nicknames, days_since_filing, show_dates)
 
     print()
 
@@ -524,9 +534,10 @@ def main():
     parser = argparse.ArgumentParser(description="USCIS Receipt Summary")
     parser.add_argument("--anon", action="store_true", help="Use anonymized names from config")
     parser.add_argument("--days-since-filing", action="store_true", help="Show days since filing date (IAF) instead of days ago from today")
+    parser.add_argument("--show-dates", action="store_true", help="Show dates (M/D) instead of days")
     args = parser.parse_args()
 
-    print_summary(anon=args.anon, days_since_filing=args.days_since_filing)
+    print_summary(anon=args.anon, days_since_filing=args.days_since_filing, show_dates=args.show_dates)
 
 
 if __name__ == "__main__":
