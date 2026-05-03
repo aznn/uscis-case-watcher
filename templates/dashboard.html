@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - USCIS Case Watcher{% endblock %}
+
+{% block content %}
+{% for form_type in form_types %}
+{% set receipts_for_type = grouped[form_type] %}
+{% set form_name = receipts_for_type[0].get("formName", "") if receipts_for_type else "" %}
+
+<div class="mb-8">
+  <h2 class="text-xl font-bold mb-1">{{ form_type }}</h2>
+  <p class="text-sm text-gray-500 mb-3">{{ form_name }}</p>
+
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm border border-gray-200">
+      <thead class="bg-gray-100">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium text-gray-700 border-b">Case</th>
+          <th class="px-3 py-2 text-left font-medium text-gray-700 border-b">Loc</th>
+          {% for item in timeline %}
+            {% set typ = item[0] %}
+            {% set identifier = item[1] %}
+            {% set count = item[3] %}
+            {% for i in range(count) %}
+              <th class="px-3 py-2 text-left font-medium border-b {{ 'text-gray-400' if typ == 'silent' else 'text-gray-700' }}">
+                {% if typ == "silent" %}S{% else %}{{ identifier }}{% endif %}
+              </th>
+            {% endfor %}
+          {% endfor %}
+          <th class="px-3 py-2 text-left font-medium text-gray-700 border-b">Last Updated</th>
+          <th class="px-3 py-2 text-left font-medium text-gray-700 border-b">Last Checked</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for receipt in receipts_for_type %}
+        {% set events = receipt.get("events", []) %}
+        {% set silent_updates = receipt.get("silent_updates", []) %}
+        {% set location = receipt.get("receipt_info", {}).get("location", "-") if receipt.get("receipt_info") else "-" %}
+        {% set folder = receipt.get("folder_name", slugify(receipt["nickname"])) %}
+        <tr class="border-b hover:bg-gray-50">
+          <td class="px-3 py-2">
+            <a href="/case/{{ folder }}" class="text-blue-600 hover:underline font-medium">{{ receipt["nickname"] }}</a>
+          </td>
+          <td class="px-3 py-2 text-gray-600">{{ location }}</td>
+
+          {# Build event lookup for this receipt #}
+          {% set ns = namespace(event_map={}, silent_map={}) %}
+          {% for event in events %}
+            {% if event.get("eventCode") and event.get("eventTimestamp") %}
+              {% set code = event["eventCode"] %}
+              {% set ts = event["eventTimestamp"] %}
+              {% set dt = ts[:10] %}
+              {% set key = code ~ "|" ~ dt %}
+              {% if key in ns.event_map %}
+                {% set _ = ns.event_map.__setitem__(key, ns.event_map[key] ~ "," ~ ts) %}
+              {% else %}
+                {% set _ = ns.event_map.__setitem__(key, ts) %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% for sts in silent_updates %}
+            {% set dt = sts[:10] %}
+            {% if dt in ns.silent_map %}
+              {% set _ = ns.silent_map.__setitem__(dt, ns.silent_map[dt] ~ "," ~ sts) %}
+            {% else %}
+              {% set _ = ns.silent_map.__setitem__(dt, sts) %}
+            {% endif %}
+          {% endfor %}
+
+          {% for item in timeline %}
+            {% set typ = item[0] %}
+            {% set identifier = item[1] %}
+            {% set date = item[2] %}
+            {% set count = item[3] %}
+            {% for i in range(count) %}
+              <td class="px-3 py-2 text-center {{ 'text-gray-400' if typ == 'silent' else '' }}">
+                {% if typ == "event" %}
+                  {% set key = identifier ~ "|" ~ date %}
+                  {% set timestamps = ns.event_map.get(key, "").split(",") %}
+                  {% if i < timestamps|length and timestamps[i] %}
+                    {{ get_days_since(timestamps[i]) }}d
+                  {% else %}
+                    <span class="text-gray-300">&middot;</span>
+                  {% endif %}
+                {% else %}
+                  {% set timestamps = ns.silent_map.get(date, "").split(",") %}
+                  {% if i < timestamps|length and timestamps[i] %}
+                    {{ get_days_since(timestamps[i]) }}d
+                  {% else %}
+                    <span class="text-gray-300">&middot;</span>
+                  {% endif %}
+                {% endif %}
+              </td>
+            {% endfor %}
+          {% endfor %}
+
+          <td class="px-3 py-2 text-gray-600 text-xs">
+            {% if receipt.get("updatedAtTimestamp") %}
+              {{ get_time_ago(receipt["updatedAtTimestamp"]) }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td class="px-3 py-2 text-gray-600 text-xs">
+            {% if receipt.get("last_run_at") %}
+              {{ get_time_ago(receipt["last_run_at"]) }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

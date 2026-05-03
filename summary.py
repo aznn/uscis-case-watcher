@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 from datetime import datetime, timezone
@@ -26,13 +27,16 @@ def slugify(text: str) -> str:
 
 
 def load_anon_mapping() -> dict[str, str]:
-    """Load nickname to anon_name mapping from config"""
-    if not CONFIG_FILE.exists():
-        return {}
-
+    """Load nickname to anon_name mapping from USCIS_CONFIG_JSON env var or config.json."""
     try:
-        with open(CONFIG_FILE) as f:
-            config = json.load(f)
+        config_json = os.environ.get("USCIS_CONFIG_JSON")
+        if config_json:
+            config = json.loads(config_json)
+        elif CONFIG_FILE.exists():
+            with open(CONFIG_FILE) as f:
+                config = json.load(f)
+        else:
+            return {}
 
         mapping = {}
         for account in config.get("accounts", []):
