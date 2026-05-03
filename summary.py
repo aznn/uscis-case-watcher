@@ -152,6 +152,12 @@ def get_short_date(timestamp: str) -> str:
     return f"{dt.month}/{dt.day}"
 
 
+def get_date_label(timestamp: str) -> str:
+    """Format timestamp as 'Jan 15, 2024' for absolute date display."""
+    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    return dt.strftime("%b %-d, %Y")
+
+
 def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
     """
     Build a chronological timeline grouped by (event_code, date) or (silent, date).

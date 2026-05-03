@@ -17,6 +17,7 @@ from summary import (
     get_days_since,
     get_time_ago,
     get_short_date,
+    get_date_label,
     slugify,
     OUTPUT_DIR,
 )
@@ -78,6 +79,7 @@ def dashboard():
         get_days_since=get_days_since,
         get_time_ago=get_time_ago,
         get_short_date=get_short_date,
+        get_date_label=get_date_label,
         slugify=slugify,
     )
 

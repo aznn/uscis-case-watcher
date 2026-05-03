@@ -5,15 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}USCIS Case Watcher{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body.time-relative .time-absolute { display: none; }
+    body.time-absolute .time-relative { display: none; }
+  </style>
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen">
   <nav class="bg-white border-b border-gray-200 px-6 py-3">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <a href="/" class="text-lg font-semibold text-gray-800">USCIS Case Watcher</a>
+      <button id="time-toggle" onclick="toggleTimeView()"
+        class="text-sm px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100">
+        Show Dates
+      </button>
     </div>
   </nav>
   <main class="max-w-7xl mx-auto px-6 py-6">
     {% block content %}{% endblock %}
   </main>
+  <script>
+    function toggleTimeView() {
+      var isRelative = document.body.classList.contains('time-relative');
+      var next = isRelative ? 'time-absolute' : 'time-relative';
+      document.body.classList.remove('time-relative', 'time-absolute');
+      document.body.classList.add(next);
+      document.getElementById('time-toggle').textContent =
+        next === 'time-relative' ? 'Show Dates' : 'Show Days';
+      localStorage.setItem('timeView', next);
+    }
+
+    (function() {
+      var pref = localStorage.getItem('timeView') || 'time-relative';
+      document.body.classList.add(pref);
+      window.addEventListener('DOMContentLoaded', function() {
+        var btn = document.getElementById('time-toggle');
+        if (btn) btn.textContent = pref === 'time-relative' ? 'Show Dates' : 'Show Days';
+      });
+    })();
+  </script>
 </body>
 </html>
