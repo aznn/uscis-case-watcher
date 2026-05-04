@@ -19,13 +19,13 @@
       {% if case_data.get("updatedAtTimestamp") %}
         <span>Last updated: <strong>
           <span class="time-relative">{{ get_time_ago(case_data["updatedAtTimestamp"]) }}</span>
-          <span class="time-absolute" data-ts="{{ case_data['updatedAtTimestamp'] }}"></span>
+          <span class="time-absolute" data-format="datetime" data-ts="{{ case_data['updatedAtTimestamp'] }}"></span>
         </strong></span>
       {% endif %}
       {% if last_run %}
         <span>Last checked: <strong>
           <span class="time-relative">{{ get_time_ago(last_run) }}</span>
-          <span class="time-absolute" data-ts="{{ last_run }}"></span>
+          <span class="time-absolute" data-format="datetime" data-ts="{{ last_run }}"></span>
         </strong></span>
       {% endif %}
     {% endif %}
@@ -43,7 +43,7 @@
       <span class="text-gray-600">
         {% if event.get("createdAtTimestamp") %}
           <span class="time-relative">{{ get_time_ago(event["createdAtTimestamp"]) }}</span>
-          <span class="time-absolute" data-ts="{{ event['createdAtTimestamp'] }}"></span>
+          <span class="time-absolute" data-format="datetime" data-ts="{{ event['createdAtTimestamp'] }}"></span>
         {% endif %}
       </span>
     </div>
@@ -63,7 +63,7 @@
       <span class="text-gray-600">
         {% if notice.get("generationDate") %}
           <span class="time-relative">{{ get_time_ago(notice["generationDate"]) }}</span>
-          <span class="time-absolute" data-ts="{{ notice['generationDate'] }}"></span>
+          <span class="time-absolute" data-format="datetime" data-ts="{{ notice['generationDate'] }}"></span>
         {% endif %}
       </span>
     </div>

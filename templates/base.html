@@ -24,10 +24,6 @@
     {% block content %}{% endblock %}
   </main>
   <script>
-    function formatLocalDate(isoStr) {
-      return new Date(isoStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    }
-
     function toggleTimeView() {
       var isRelative = document.body.classList.contains('time-relative');
       var next = isRelative ? 'time-absolute' : 'time-relative';
@@ -43,7 +39,10 @@
       document.body.classList.add(pref);
       window.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('.time-absolute[data-ts]').forEach(function(el) {
-          el.textContent = formatLocalDate(el.getAttribute('data-ts'));
+          var d = new Date(el.getAttribute('data-ts'));
+          el.textContent = el.dataset.format === 'datetime'
+            ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+            : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
         });
         var btn = document.getElementById('time-toggle');
         if (btn) btn.textContent = pref === 'time-relative' ? 'Show Dates' : 'Show Days';
