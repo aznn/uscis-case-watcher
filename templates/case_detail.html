@@ -17,10 +17,16 @@
         <span>Receipt: <strong>{{ case_data["receiptNumber"] }}</strong></span>
       {% endif %}
       {% if case_data.get("updatedAtTimestamp") %}
-        <span>Last updated: <strong>{{ get_time_ago(case_data["updatedAtTimestamp"]) }}</strong></span>
+        <span>Last updated: <strong>
+          <span class="time-relative">{{ get_time_ago(case_data["updatedAtTimestamp"]) }}</span>
+          <span class="time-absolute" data-ts="{{ case_data['updatedAtTimestamp'] }}"></span>
+        </strong></span>
       {% endif %}
       {% if last_run %}
-        <span>Last checked: <strong>{{ get_time_ago(last_run) }}</strong></span>
+        <span>Last checked: <strong>
+          <span class="time-relative">{{ get_time_ago(last_run) }}</span>
+          <span class="time-absolute" data-ts="{{ last_run }}"></span>
+        </strong></span>
       {% endif %}
     {% endif %}
   </div>
@@ -36,7 +42,8 @@
       <span class="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-mono text-xs">{{ event.get("eventCode", "?") }}</span>
       <span class="text-gray-600">
         {% if event.get("createdAtTimestamp") %}
-          {{ get_time_ago(event["createdAtTimestamp"]) }}
+          <span class="time-relative">{{ get_time_ago(event["createdAtTimestamp"]) }}</span>
+          <span class="time-absolute" data-ts="{{ event['createdAtTimestamp'] }}"></span>
         {% endif %}
       </span>
     </div>
@@ -55,7 +62,8 @@
       <span class="inline-block bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs">{{ notice.get("actionType", "Unknown") }}</span>
       <span class="text-gray-600">
         {% if notice.get("generationDate") %}
-          {{ get_time_ago(notice["generationDate"]) }}
+          <span class="time-relative">{{ get_time_ago(notice["generationDate"]) }}</span>
+          <span class="time-absolute" data-ts="{{ notice['generationDate'] }}"></span>
         {% endif %}
       </span>
     </div>

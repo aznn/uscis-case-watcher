@@ -78,7 +78,7 @@
                   {% set timestamps = ns.event_map.get(key, "").split(",") %}
                   {% if i < timestamps|length and timestamps[i] %}
                     <span class="time-relative">{{ get_days_since(timestamps[i]) }}d</span>
-                    <span class="time-absolute">{{ get_date_label(timestamps[i]) }}</span>
+                    <span class="time-absolute" data-ts="{{ timestamps[i] }}"></span>
                   {% else %}
                     <span class="text-gray-300">&middot;</span>
                   {% endif %}
@@ -86,7 +86,7 @@
                   {% set timestamps = ns.silent_map.get(date, "").split(",") %}
                   {% if i < timestamps|length and timestamps[i] %}
                     <span class="time-relative">{{ get_days_since(timestamps[i]) }}d</span>
-                    <span class="time-absolute">{{ get_date_label(timestamps[i]) }}</span>
+                    <span class="time-absolute" data-ts="{{ timestamps[i] }}"></span>
                   {% else %}
                     <span class="text-gray-300">&middot;</span>
                   {% endif %}
@@ -98,7 +98,7 @@
           <td class="px-3 py-2 text-gray-600 text-xs">
             {% if receipt.get("updatedAtTimestamp") %}
               <span class="time-relative">{{ get_time_ago(receipt["updatedAtTimestamp"]) }}</span>
-              <span class="time-absolute">{{ get_date_label(receipt["updatedAtTimestamp"]) }}</span>
+              <span class="time-absolute" data-ts="{{ receipt['updatedAtTimestamp'] }}"></span>
             {% else %}
               -
             {% endif %}
@@ -106,7 +106,7 @@
           <td class="px-3 py-2 text-gray-600 text-xs">
             {% if receipt.get("last_run_at") %}
               <span class="time-relative">{{ get_time_ago(receipt["last_run_at"]) }}</span>
-              <span class="time-absolute">{{ get_date_label(receipt["last_run_at"]) }}</span>
+              <span class="time-absolute" data-ts="{{ receipt['last_run_at'] }}"></span>
             {% else %}
               -
             {% endif %}
