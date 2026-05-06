@@ -92,7 +92,7 @@
             {% endfor %}
           {% endfor %}
 
-          <td class="px-3 py-2 text-gray-600 text-xs">
+          <td class="px-3 py-2 text-xs {% if receipt.get('updatedAtTimestamp') and get_days_since(receipt['updatedAtTimestamp']) < 1 %}text-red-600 font-medium{% else %}text-gray-600{% endif %}">
             {% if receipt.get("updatedAtTimestamp") %}
               <span class="time-relative">{{ get_time_ago(receipt["updatedAtTimestamp"]) }}</span>
               <span class="time-absolute" data-ts="{{ receipt['updatedAtTimestamp'] }}"></span>
