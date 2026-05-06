@@ -160,35 +160,37 @@ def get_date_label(timestamp: str) -> str:
 
 def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
     """
-    Build a chronological timeline grouped by (event_code, date) or (silent, date).
+    Build a chronological timeline grouped by event_code or (silent, date).
 
     Returns a list of (type, identifier, date, count) tuples sorted chronologically.
     - type: "event" or "silent"
     - identifier: event code or "S"
-    - date: the date (YYYY-MM-DD) for this group
-    - count: how many columns needed (max occurrences for any single case on this date)
+    - date: earliest date (YYYY-MM-DD) for this group (used for sort order)
+    - count: how many columns needed (max total occurrences of this code in any single case)
     """
-    # Group events by (code, date) and track max occurrences
-    event_groups = defaultdict(lambda: {"date": "", "timestamps": set(), "max_count": 0})
+    # Group events by code only and track max total occurrences across all receipts
+    event_groups: dict[str, dict] = {}  # code -> {"earliest": ts, "max_count": 0}
 
     for receipt in receipts:
         events = receipt.get("events", [])
-        # Track occurrences per (code, date) for this receipt
-        receipt_event_counts = defaultdict(int)
+        receipt_code_counts: dict[str, int] = defaultdict(int)
+        receipt_code_earliest: dict[str, str] = {}
 
         for event in events:
             code = event.get("eventCode")
             timestamp = event.get("eventTimestamp")
             if code and timestamp:
-                date = get_date_from_timestamp(timestamp)
-                key = (code, date)
-                event_groups[key]["date"] = date
-                event_groups[key]["timestamps"].add(timestamp)
-                receipt_event_counts[key] += 1
+                receipt_code_counts[code] += 1
+                if code not in receipt_code_earliest or timestamp < receipt_code_earliest[code]:
+                    receipt_code_earliest[code] = timestamp
 
-        # Update max counts
-        for key, count in receipt_event_counts.items():
-            event_groups[key]["max_count"] = max(event_groups[key]["max_count"], count)
+        for code, count in receipt_code_counts.items():
+            if code not in event_groups:
+                event_groups[code] = {"earliest": receipt_code_earliest[code], "max_count": 0}
+            else:
+                if receipt_code_earliest[code] < event_groups[code]["earliest"]:
+                    event_groups[code]["earliest"] = receipt_code_earliest[code]
+            event_groups[code]["max_count"] = max(event_groups[code]["max_count"], count)
 
     # Group silent updates by date
     silent_groups = defaultdict(lambda: {"date": "", "timestamps": set(), "max_count": 0})
@@ -210,11 +212,10 @@ def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
     # Build timeline entries
     timeline = []
 
-    # Add event groups
-    for (code, date), info in event_groups.items():
-        # Get earliest timestamp from this group for sorting
-        earliest = min(info["timestamps"])
-        timeline.append((earliest, "event", code, date, info["max_count"]))
+    # Add event groups (one entry per unique code)
+    for code, info in event_groups.items():
+        earliest = info["earliest"]
+        timeline.append((earliest, "event", code, earliest[:10], info["max_count"]))
 
     # Add silent update groups
     for date, info in silent_groups.items():
@@ -364,8 +365,6 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
     # Build headers: Nickname, Loc, [timeline columns]
     headers = ["Nickname", "Loc"]
 
-    # Track event code occurrence numbers for header naming
-    event_occurrence_count = {}
     silent_occurrence_count = 0
 
     # Add columns for each timeline entry
@@ -376,17 +375,12 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
         count = item[3]
 
         if typ == "event":
-            # Create 'count' number of columns for this (event_code, date) group
+            # Create 'count' number of columns for this event code
             for i in range(count):
-                event_occurrence_count[identifier] = event_occurrence_count.get(identifier, 0) + 1
-                occurrence = event_occurrence_count[identifier]
-
-                # Count total columns for this event code across all dates
-                total_occurrences = sum(item2[3] for item2 in timeline if item2[0] == "event" and item2[1] == identifier)
-                if total_occurrences == 1:
+                if count == 1:
                     headers.append(identifier)
                 else:
-                    headers.append(f"{identifier}-{occurrence}")
+                    headers.append(f"{identifier}-{i + 1}")
         else:  # silent update
             # Create 'count' number of columns for this date
             for i in range(count):
@@ -429,18 +423,17 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
                     iaf_timestamp = event.get("eventTimestamp")
                     break
 
-        # Create lookup maps for this receipt - group by (code, date)
-        event_timestamps_by_date = defaultdict(list)  # (code, date) -> list of timestamps
+        # Create lookup maps for this receipt - group by code only
+        event_timestamps_by_code: dict[str, list] = defaultdict(list)  # code -> list of timestamps
         for event in events:
             code = event.get("eventCode")
             timestamp = event.get("eventTimestamp")
             if code and timestamp:
-                date = get_date_from_timestamp(timestamp)
-                event_timestamps_by_date[(code, date)].append(timestamp)
+                event_timestamps_by_code[code].append(timestamp)
 
         # Sort timestamps chronologically within each group
-        for key in event_timestamps_by_date:
-            event_timestamps_by_date[key].sort()
+        for key in event_timestamps_by_code:
+            event_timestamps_by_code[key].sort()
 
         # Group silent updates by date
         silent_timestamps_by_date = defaultdict(list)
@@ -469,9 +462,8 @@ def print_table(form_type: str, receipts: list[dict], changed_nicknames: Optiona
             count = item[3]
 
             if typ == "event":
-                # Get events for this (code, date) from this receipt
-                key = (identifier, date)
-                receipt_events = event_timestamps_by_date.get(key, [])
+                # Get events for this code from this receipt (sorted chronologically)
+                receipt_events = event_timestamps_by_code.get(identifier, [])
 
                 # Fill in columns (up to 'count' columns)
                 for i in range(count):

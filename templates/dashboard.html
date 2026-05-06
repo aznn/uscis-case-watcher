@@ -21,7 +21,7 @@
             {% set identifier = item[1] %}
             {% set count = item[3] %}
             {% for i in range(count) %}
-              <th class="px-3 py-2 text-left font-medium border-b {{ 'text-gray-400' if typ == 'silent' else 'text-gray-700' }}">
+              <th class="px-3 py-2 text-center font-medium border-b {{ 'text-gray-400' if typ == 'silent' else 'text-gray-700' }}">
                 {% if typ == "silent" %}S{% else %}{{ identifier }}{% endif %}
               </th>
             {% endfor %}
@@ -44,16 +44,14 @@
 
           {# Build event lookup for this receipt #}
           {% set ns = namespace(event_map={}, silent_map={}) %}
-          {% for event in events %}
+          {% for event in events|sort(attribute="eventTimestamp") %}
             {% if event.get("eventCode") and event.get("eventTimestamp") %}
               {% set code = event["eventCode"] %}
               {% set ts = event["eventTimestamp"] %}
-              {% set dt = ts[:10] %}
-              {% set key = code ~ "|" ~ dt %}
-              {% if key in ns.event_map %}
-                {% set _ = ns.event_map.__setitem__(key, ns.event_map[key] ~ "," ~ ts) %}
+              {% if code in ns.event_map %}
+                {% set _ = ns.event_map.__setitem__(code, ns.event_map[code] ~ "," ~ ts) %}
               {% else %}
-                {% set _ = ns.event_map.__setitem__(key, ts) %}
+                {% set _ = ns.event_map.__setitem__(code, ts) %}
               {% endif %}
             {% endif %}
           {% endfor %}
@@ -74,8 +72,7 @@
             {% for i in range(count) %}
               <td class="px-3 py-2 text-center {{ 'text-gray-400' if typ == 'silent' else '' }}">
                 {% if typ == "event" %}
-                  {% set key = identifier ~ "|" ~ date %}
-                  {% set timestamps = ns.event_map.get(key, "").split(",") %}
+                  {% set timestamps = ns.event_map.get(identifier, "").split(",") %}
                   {% if i < timestamps|length and timestamps[i] %}
                     <span class="time-relative">{{ get_days_since(timestamps[i]) }}d</span>
                     <span class="time-absolute" data-ts="{{ timestamps[i] }}"></span>
