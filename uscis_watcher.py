@@ -9,19 +9,22 @@ import argparse
 import copy
 import difflib
 import json
+import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from pathlib import Path
 
 from selenium import webdriver
 from pyotp import TOTP
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from deepdiff import DeepDiff
 from summary import print_summary
+import db as historydb
 
 # File paths
 SCRIPT_DIR = Path(__file__).parent
@@ -30,10 +33,15 @@ OUTPUT_DIR = SCRIPT_DIR / "output"
 
 
 def load_config() -> dict:
-    """Load configuration from config.json"""
+    """Load configuration from USCIS_CONFIG_JSON env var or config.json file."""
+    config_json = os.environ.get("USCIS_CONFIG_JSON")
+    if config_json:
+        return json.loads(config_json)
     if not CONFIG_FILE.exists():
-        raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
-
+        raise FileNotFoundError(
+            f"Config file not found: {CONFIG_FILE}. "
+            "Set USCIS_CONFIG_JSON env var or create config.json."
+        )
     with open(CONFIG_FILE, "r") as f:
         return json.load(f)
 
@@ -47,7 +55,6 @@ def humanize_time_ago(timestamp_str: str) -> str:
         ts = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
         # Make it timezone-aware if it isn't
         if ts.tzinfo is None:
-            from datetime import timezone
             ts = ts.replace(tzinfo=timezone.utc)
         now = datetime.now(ts.tzinfo)
         delta = now - ts
@@ -204,6 +211,13 @@ def save_silent_update(nickname: str, timestamp: str) -> Path:
     return silent_updates_file
 
 
+def save_last_run(nickname: str, timestamp: str) -> None:
+    """Save the timestamp of the most recent successful watcher run for this case."""
+    case_dir = get_case_output_dir(nickname)
+    with open(case_dir / "last_run.json", "w") as f:
+        json.dump({"last_run_at": timestamp}, f)
+
+
 def is_silent_update(diff: dict) -> bool:
     """
     Check if a diff represents a silent update.
@@ -267,6 +281,7 @@ def process_data_source(
     case_number: str,
     new_data: dict,
     dry_run: bool = False,
+    db_conn=None,
 ) -> tuple[bool, Optional[dict]]:
     """
     Process a single data source: compare with old data, detect changes, save, and log.
@@ -285,37 +300,62 @@ def process_data_source(
         diff = DeepDiff(old_data, new_data, ignore_order=True)
         if diff:
             has_changes = True
+            timestamp = datetime.now().isoformat() + "Z"
             # Special handling for case_details (main case data)
             if source_key == "case_details":
                 # Check if this is a silent update
                 if is_silent_update(diff):
                     print(f"  {nickname}: Silent update detected (updatedAt timestamp changed)")
                     if not dry_run:
-                        # Save silent update timestamp
-                        timestamp = datetime.now().isoformat() + "Z"
                         save_silent_update(nickname, timestamp)
-                        # Still log to changelog
-                        changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
+                        append_changelog(nickname, case_number, diff, old_data, new_data)
+                        if db_conn:
+                            historydb.record_change(
+                                db_conn, nickname, case_number, source_key,
+                                timestamp, is_silent=True, summary="Silent update",
+                            )
                 else:
                     # Normal change - alert and log
                     print_change_alert(nickname, case_number, diff, old_data, new_data)
+                    summary_msgs = detect_important_changes(old_data, new_data)
+                    summary_text = "; ".join(summary_msgs) if summary_msgs else f"{label} changed"
                     if not dry_run:
                         changelog_path = append_changelog(nickname, case_number, diff, old_data, new_data)
                         print(f"  Changelog updated: {changelog_path}")
+                        if db_conn:
+                            historydb.record_change(
+                                db_conn, nickname, case_number, source_key,
+                                timestamp, diff_json=json.loads(diff.to_json()),
+                                summary=summary_text,
+                            )
             # Special handling for receipt_info (show location change)
             elif source_key == "receipt_info":
                 old_loc = old_data.get("data", {}).get("receipt_details", {}).get("location") if old_data.get("data") else None
                 new_loc = new_data.get("data", {}).get("receipt_details", {}).get("location") if new_data.get("data") else None
                 if old_loc != new_loc:
+                    summary_text = f"Location changed: {old_loc} -> {new_loc}"
                     print(f"  {nickname}: {label} location changed: {old_loc} -> {new_loc}")
                 else:
+                    summary_text = f"{label} changed"
                     print(f"  {nickname}: {label} changed")
                 if not dry_run:
                     append_changelog(nickname, case_number, diff, old_data, new_data)
+                    if db_conn:
+                        historydb.record_change(
+                            db_conn, nickname, case_number, source_key,
+                            timestamp, diff_json=json.loads(diff.to_json()),
+                            summary=summary_text,
+                        )
             else:
                 print(f"  {nickname}: {label} changed")
                 if not dry_run:
                     append_changelog(nickname, case_number, diff, old_data, new_data)
+                    if db_conn:
+                        historydb.record_change(
+                            db_conn, nickname, case_number, source_key,
+                            timestamp, diff_json=json.loads(diff.to_json()),
+                            summary=f"{label} changed",
+                        )
         elif source_key == "case_details":
             # Only print "no changes" for main case data
             print(f"  {nickname}: No changes")
@@ -577,7 +617,7 @@ def print_change_alert(nickname: str, case_number: str, diff: dict, old_data: di
 
 
 class USCISWatcher:
-    def __init__(self, account: dict, browser_config: dict, verbose: bool = False):
+    def __init__(self, account: dict, browser_config: dict, verbose: bool = False, force_headless: bool = False):
         self.username = account["username"]
         self.password = account["password"]
         self.totp_secret = account["totp_secret"]
@@ -586,6 +626,7 @@ class USCISWatcher:
         self.browser_config = browser_config
         self.driver = None
         self.verbose = verbose
+        self.force_headless = force_headless
 
     def log(self, message: str):
         """Print message only in verbose mode"""
@@ -596,7 +637,7 @@ class USCISWatcher:
         """Initialize the Chrome driver"""
         options = Options()
 
-        if self.browser_config.get("headless", False):
+        if self.force_headless or self.browser_config.get("headless", False):
             options.add_argument("--headless=new")
 
         options.add_argument("--no-sandbox")
@@ -606,8 +647,16 @@ class USCISWatcher:
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
 
-        # Selenium Manager handles Chrome/chromedriver automatically
-        self.driver = webdriver.Chrome(options=options)
+        # Use system chromedriver if CHROMEDRIVER_PATH is set (e.g. in Docker)
+        chromedriver_path = os.environ.get("CHROMEDRIVER_PATH")
+        chrome_bin = os.environ.get("CHROME_BIN")
+        if chrome_bin:
+            options.binary_location = chrome_bin
+        if chromedriver_path:
+            service = Service(executable_path=chromedriver_path)
+            self.driver = webdriver.Chrome(service=service, options=options)
+        else:
+            self.driver = webdriver.Chrome(options=options)
         self.driver.implicitly_wait(10)
 
     def login(self) -> None:
@@ -726,7 +775,7 @@ class USCISWatcher:
 
         return processed
 
-    def process_all_cases(self, dry_run: bool = False) -> tuple[int, set[str]]:
+    def process_all_cases(self, dry_run: bool = False, db_conn=None) -> tuple[int, set[str]]:
         """Process all cases for this account. Returns (number of changes, set of changed nicknames)."""
         self.login()
 
@@ -752,7 +801,8 @@ class USCISWatcher:
                 for source_key in DATA_SOURCES:
                     new_data = all_data.get(source_key, {})
                     has_changes, diff = process_data_source(
-                        source_key, nickname, case_number, new_data, dry_run
+                        source_key, nickname, case_number, new_data, dry_run,
+                        db_conn=db_conn,
                     )
                     if has_changes:
                         case_has_changes = True
@@ -763,6 +813,9 @@ class USCISWatcher:
                 # Track changed nicknames
                 if case_has_changes:
                     changed_nicknames.add(slugify(nickname))
+
+                if not dry_run:
+                    save_last_run(nickname, datetime.now(timezone.utc).isoformat())
 
             except Exception as e:
                 print(f"  {nickname}: ERROR - {e}")
@@ -863,48 +916,27 @@ def simulate_diff():
     print("=" * 60)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="USCIS Case Watcher")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    parser.add_argument("--simulate", action="store_true", help="Simulate a diff to test change detection")
-    parser.add_argument("--dry-run", action="store_true", help="Check for changes without saving")
-    args = parser.parse_args()
-
-    if args.simulate:
-        simulate_diff()
-        return
-
+def run_once(args, config, db_conn):
+    """Run a single check of all accounts. Returns total changes detected."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"USCIS Watcher - {timestamp}")
 
-    # Load config
-    try:
-        config = load_config()
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        print("Please create a config.json file with your USCIS credentials.")
-        return
-
     browser_config = config.get("browser", {})
     accounts = config.get("accounts", [])
-
-    if not accounts:
-        print("Error: No accounts configured in config.json")
-        return
+    force_headless = args.headless or os.environ.get("HEADLESS", "").lower() == "true"
 
     total_changes = 0
     all_changed_nicknames = set()
 
-    # Process each account
     for account in accounts:
         account_name = account.get("name", "default")
         print(f"\nAccount: {account_name}")
         print("-" * 40)
 
-        watcher = USCISWatcher(account, browser_config, verbose=args.verbose)
+        watcher = USCISWatcher(account, browser_config, verbose=args.verbose, force_headless=force_headless)
 
         try:
-            changes, changed_nicknames = watcher.process_all_cases(dry_run=args.dry_run)
+            changes, changed_nicknames = watcher.process_all_cases(dry_run=args.dry_run, db_conn=db_conn)
             total_changes += changes
             all_changed_nicknames.update(changed_nicknames)
         except Exception as e:
@@ -921,8 +953,54 @@ def main():
         print("All cases checked - no changes")
     print("=" * 40)
 
-    # Print the summary table
     print_summary(all_changed_nicknames if all_changed_nicknames else None)
+    return total_changes
+
+
+def main():
+    parser = argparse.ArgumentParser(description="USCIS Case Watcher")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--simulate", action="store_true", help="Simulate a diff to test change detection")
+    parser.add_argument("--dry-run", action="store_true", help="Check for changes without saving")
+    parser.add_argument("--daemon", action="store_true", help="Run continuously with periodic checks")
+    parser.add_argument("--headless", action="store_true", help="Force headless browser mode")
+    args = parser.parse_args()
+
+    if args.simulate:
+        simulate_diff()
+        return
+
+    # Load config
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Please create a config.json file with your USCIS credentials.")
+        return
+
+    accounts = config.get("accounts", [])
+    if not accounts:
+        print("Error: No accounts configured in config.json")
+        return
+
+    # Open DB connection
+    db_conn = historydb.get_db()
+
+    try:
+        if args.daemon:
+            poll_minutes = int(os.environ.get("POLL_INTERVAL_MINUTES", 60))
+            print(f"Running in daemon mode, polling every {poll_minutes} minutes")
+            while True:
+                try:
+                    run_once(args, config, db_conn)
+                except Exception as e:
+                    print(f"Error during run: {e}")
+                print(f"\nSleeping {poll_minutes} minutes until next check...\n")
+                time.sleep(poll_minutes * 60)
+        else:
+            run_once(args, config, db_conn)
+    finally:
+        db_conn.close()
 
 
 if __name__ == "__main__":
