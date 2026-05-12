@@ -17,6 +17,8 @@ SCRIPT_DIR = Path(__file__).parent
 OUTPUT_DIR = SCRIPT_DIR / "output"
 CONFIG_FILE = SCRIPT_DIR / "config.json"
 
+HIDDEN_EVENT_CODES = {"IMAG"}
+
 
 def slugify(text: str) -> str:
     """Convert text to a filesystem-safe slug"""
@@ -179,7 +181,7 @@ def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
         for event in events:
             code = event.get("eventCode")
             timestamp = event.get("eventTimestamp")
-            if code and timestamp:
+            if code and timestamp and code not in HIDDEN_EVENT_CODES:
                 receipt_code_counts[code] += 1
                 if code not in receipt_code_earliest or timestamp < receipt_code_earliest[code]:
                     receipt_code_earliest[code] = timestamp
