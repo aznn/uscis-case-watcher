@@ -225,7 +225,7 @@ def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
         timeline.append((earliest, "silent", "S", date, info["max_count"]))
 
     # Sort by earliest timestamp in each group
-    timeline.sort(key=lambda x: x[0])
+    timeline.sort(key=lambda x: (0 if x[1] == "event" else 1, x[0]))
 
     # Return as (type, identifier, date, count) tuples
     return [(typ, identifier, date, count) for _, typ, identifier, date, count in timeline]
