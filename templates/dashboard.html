@@ -55,12 +55,11 @@
               {% endif %}
             {% endif %}
           {% endfor %}
-          {% for sts in silent_updates %}
-            {% set dt = sts[:10] %}
-            {% if dt in ns.silent_map %}
-              {% set _ = ns.silent_map.__setitem__(dt, ns.silent_map[dt] ~ "," ~ sts) %}
+          {% for sts in silent_updates|sort %}
+            {% if "all" in ns.silent_map %}
+              {% set _ = ns.silent_map.__setitem__("all", ns.silent_map["all"] ~ "," ~ sts) %}
             {% else %}
-              {% set _ = ns.silent_map.__setitem__(dt, sts) %}
+              {% set _ = ns.silent_map.__setitem__("all", sts) %}
             {% endif %}
           {% endfor %}
 
@@ -80,7 +79,7 @@
                     <span class="text-gray-300">&middot;</span>
                   {% endif %}
                 {% else %}
-                  {% set timestamps = ns.silent_map.get(date, "").split(",") %}
+                  {% set timestamps = ns.silent_map.get("all", "").split(",") %}
                   {% if i < timestamps|length and timestamps[i] %}
                     <span class="time-relative">{{ get_days_since(timestamps[i]) }}d</span>
                     <span class="time-absolute" data-ts="{{ timestamps[i] }}"></span>

@@ -194,23 +194,6 @@ def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
                     event_groups[code]["earliest"] = receipt_code_earliest[code]
             event_groups[code]["max_count"] = max(event_groups[code]["max_count"], count)
 
-    # Group silent updates by date
-    silent_groups = defaultdict(lambda: {"date": "", "timestamps": set(), "max_count": 0})
-
-    for receipt in receipts:
-        silent_updates = receipt.get("silent_updates", [])
-        receipt_silent_counts = defaultdict(int)
-
-        for silent_ts in silent_updates:
-            date = get_date_from_timestamp(silent_ts)
-            silent_groups[date]["date"] = date
-            silent_groups[date]["timestamps"].add(silent_ts)
-            receipt_silent_counts[date] += 1
-
-        # Update max counts
-        for date, count in receipt_silent_counts.items():
-            silent_groups[date]["max_count"] = max(silent_groups[date]["max_count"], count)
-
     # Build timeline entries
     timeline = []
 
@@ -219,10 +202,17 @@ def build_timeline(receipts: list[dict]) -> list[tuple[str, str, str, int]]:
         earliest = info["earliest"]
         timeline.append((earliest, "event", code, earliest[:10], info["max_count"]))
 
-    # Add silent update groups
-    for date, info in silent_groups.items():
-        earliest = min(info["timestamps"])
-        timeline.append((earliest, "silent", "S", date, info["max_count"]))
+    # Collapse all silent updates into a single group
+    all_silent_timestamps = []
+    max_silent_per_receipt = 0
+    for receipt in receipts:
+        su = receipt.get("silent_updates", [])
+        all_silent_timestamps.extend(su)
+        max_silent_per_receipt = max(max_silent_per_receipt, len(su))
+
+    if all_silent_timestamps:
+        earliest = min(all_silent_timestamps)
+        timeline.append((earliest, "silent", "S", "all", max_silent_per_receipt))
 
     # Sort by earliest timestamp in each group
     timeline.sort(key=lambda x: (0 if x[1] == "event" else 1, x[0]))
