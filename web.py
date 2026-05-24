@@ -11,6 +11,7 @@ from flask import Flask, render_template, jsonify
 import db as historydb
 from summary import (
     load_all_receipts,
+    load_silent_updates,
     group_by_form_type,
     build_timeline,
     get_event_occurrences,
@@ -94,6 +95,24 @@ def case_detail(nickname: str):
     changes = historydb.get_changes(conn, nickname=nickname, limit=200)
     timeline_entries = historydb.get_timeline(conn, nickname=nickname)
     conn.close()
+
+    folder = OUTPUT_DIR / nickname
+    file_silent_updates = load_silent_updates(folder)
+    if file_silent_updates:
+        db_timestamps = {c["detected_at"] for c in changes if c["is_silent"]}
+        for ts in file_silent_updates:
+            if ts not in db_timestamps:
+                changes.append({
+                    "id": None,
+                    "nickname": nickname,
+                    "case_number": "",
+                    "source_key": "silent",
+                    "detected_at": ts,
+                    "is_silent": 1,
+                    "diff_json": None,
+                    "summary": "Silent update",
+                })
+        changes.sort(key=lambda c: c["detected_at"], reverse=True)
 
     return render_template(
         "case_detail.html",
