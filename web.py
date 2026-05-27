@@ -33,12 +33,17 @@ def get_db():
 
 
 def load_case_config() -> dict[str, dict]:
-    """Load per-case config flags keyed by folder slug. Returns empty dict if config.json absent."""
-    config_path = Path("config.json")
-    if not config_path.exists():
-        return {}
-    with open(config_path) as f:
-        config = json.load(f)
+    """Load per-case config flags keyed by folder slug. Returns empty dict if no config found."""
+    import os
+    config_json = os.environ.get("USCIS_CONFIG_JSON")
+    if config_json:
+        config = json.loads(config_json)
+    else:
+        config_path = Path("config.json")
+        if not config_path.exists():
+            return {}
+        with open(config_path) as f:
+            config = json.load(f)
     result = {}
     for account in config.get("accounts", []):
         for case in account.get("cases", []):
