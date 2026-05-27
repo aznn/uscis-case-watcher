@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS changes (
     case_number TEXT NOT NULL,
     source_key TEXT NOT NULL,
     detected_at TEXT NOT NULL,
+    event_at TEXT,
     is_silent INTEGER NOT NULL DEFAULT 0,
     diff_json TEXT,
     summary TEXT,
@@ -39,6 +40,11 @@ def get_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     conn.commit()
+    try:
+        conn.execute("ALTER TABLE changes ADD COLUMN event_at TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     return conn
 
 
@@ -51,17 +57,19 @@ def record_change(
     diff_json: Optional[dict] = None,
     summary: Optional[str] = None,
     is_silent: bool = False,
+    event_at: Optional[str] = None,
 ) -> None:
     """Insert a change record. Silently ignores duplicates (same nickname+timestamp+source)."""
     conn.execute(
         """INSERT OR IGNORE INTO changes
-           (nickname, case_number, source_key, detected_at, is_silent, diff_json, summary)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (nickname, case_number, source_key, detected_at, event_at, is_silent, diff_json, summary)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             nickname,
             case_number,
             source_key,
             detected_at,
+            event_at,
             1 if is_silent else 0,
             json.dumps(diff_json) if diff_json is not None else None,
             summary,

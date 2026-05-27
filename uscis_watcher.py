@@ -303,6 +303,7 @@ def process_data_source(
             timestamp = datetime.now().isoformat() + "Z"
             # Special handling for case_details (main case data)
             if source_key == "case_details":
+                event_at = new_data.get("updatedAtTimestamp")
                 # Check if this is a silent update
                 if is_silent_update(diff):
                     print(f"  {nickname}: Silent update detected (updatedAt timestamp changed)")
@@ -313,6 +314,7 @@ def process_data_source(
                             historydb.record_change(
                                 db_conn, nickname, case_number, source_key,
                                 timestamp, is_silent=True, summary="Silent update",
+                                event_at=event_at,
                             )
                 else:
                     # Normal change - alert and log
@@ -326,7 +328,7 @@ def process_data_source(
                             historydb.record_change(
                                 db_conn, nickname, case_number, source_key,
                                 timestamp, diff_json=json.loads(diff.to_json()),
-                                summary=summary_text,
+                                summary=summary_text, event_at=event_at,
                             )
             # Special handling for receipt_info (show location change)
             elif source_key == "receipt_info":

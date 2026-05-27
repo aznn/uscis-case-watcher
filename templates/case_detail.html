@@ -81,7 +81,12 @@
     {% for change in changes %}
     <div class="border-l-4 {{ 'border-gray-300' if change['is_silent'] else 'border-blue-500' }} pl-4 py-1">
       <div class="flex items-center gap-2 mb-1">
-        <span class="text-xs font-mono text-gray-500">{{ change["detected_at"][:19] }}</span>
+        {% if change["event_at"] %}
+          <span class="time-absolute text-xs font-mono text-gray-700" data-ts="{{ change['event_at'] }}" data-format="datetime">{{ change["event_at"][:19] }}</span>
+          <span class="text-xs text-gray-400">(detected: <span class="time-absolute" data-ts="{{ change['detected_at'] }}" data-format="datetime">{{ change["detected_at"][:19] }}</span>)</span>
+        {% else %}
+          <span class="time-absolute text-xs font-mono text-gray-500" data-ts="{{ change['detected_at'] }}" data-format="datetime">{{ change["detected_at"][:19] }}</span>
+        {% endif %}
         <span class="inline-block px-2 py-0.5 rounded text-xs {{ 'bg-gray-100 text-gray-600' if change['is_silent'] else 'bg-blue-100 text-blue-800' }}">
           {{ change["source_key"] }}
         </span>
