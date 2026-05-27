@@ -32,6 +32,20 @@ def get_db():
     return historydb.get_db()
 
 
+def load_case_config() -> dict[str, dict]:
+    """Load per-case config flags keyed by folder slug. Returns empty dict if config.json absent."""
+    config_path = Path("config.json")
+    if not config_path.exists():
+        return {}
+    with open(config_path) as f:
+        config = json.load(f)
+    result = {}
+    for account in config.get("accounts", []):
+        for case in account.get("cases", []):
+            result[slugify(case["nickname"])] = case
+    return result
+
+
 def get_current_case_data(nickname_slug: str) -> dict | None:
     """Load current case data from latest.json for a given slug."""
     folder = OUTPUT_DIR / nickname_slug
@@ -55,27 +69,44 @@ def get_last_run(nickname_slug: str) -> str | None:
 @app.route("/")
 def dashboard():
     receipts = load_all_receipts()
-    grouped = group_by_form_type(receipts)
-
-    # Apply fixed ordering
-    form_types = [f for f in FORM_ORDER if f in grouped]
-    form_types.extend(f for f in sorted(grouped.keys()) if f not in FORM_ORDER)
-
-    for form_type in form_types:
-        grouped[form_type].sort(key=lambda r: r["nickname"])
+    case_config = load_case_config()
 
     for receipt in receipts:
         slug = receipt.get("folder_name", slugify(receipt["nickname"]))
         receipt["last_run_at"] = get_last_run(slug)
 
-    timeline = build_timeline(receipts)
+    def is_archived(receipt):
+        slug = receipt.get("folder_name", slugify(receipt["nickname"]))
+        return case_config.get(slug, {}).get("archived", False)
+
+    active_receipts = [r for r in receipts if not is_archived(r)]
+    archived_receipts = [r for r in receipts if is_archived(r)]
+
+    grouped = group_by_form_type(active_receipts)
+    form_types = [f for f in FORM_ORDER if f in grouped]
+    form_types.extend(f for f in sorted(grouped.keys()) if f not in FORM_ORDER)
+    for form_type in form_types:
+        grouped[form_type].sort(key=lambda r: r["nickname"])
+
+    archived_grouped = group_by_form_type(archived_receipts)
+    archived_form_types = [f for f in FORM_ORDER if f in archived_grouped]
+    archived_form_types.extend(f for f in sorted(archived_grouped.keys()) if f not in FORM_ORDER)
+    for form_type in archived_form_types:
+        archived_grouped[form_type].sort(key=lambda r: r["nickname"])
+
+    timeline = build_timeline(active_receipts)
+    archived_timeline = build_timeline(archived_receipts)
 
     return render_template(
         "dashboard.html",
         grouped=grouped,
         form_types=form_types,
         timeline=timeline,
-        receipts=receipts,
+        receipts=active_receipts,
+        archived_grouped=archived_grouped,
+        archived_form_types=archived_form_types,
+        archived_timeline=archived_timeline,
+        archived_receipts=archived_receipts,
         get_event_occurrences=get_event_occurrences,
         get_days_since=get_days_since,
         get_time_ago=get_time_ago,

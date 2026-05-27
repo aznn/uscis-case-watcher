@@ -788,6 +788,8 @@ class USCISWatcher:
         changed_nicknames = set()
 
         for case in self.cases:
+            if case.get("archived", False):
+                continue
             case_number = case["case_number"]
             nickname = case["nickname"]
 
