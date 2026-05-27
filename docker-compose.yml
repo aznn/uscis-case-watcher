@@ -20,6 +20,8 @@ services:
       target: web
     volumes:
       - ./output:/app/output:ro
+    environment:
+      - USCIS_CONFIG_JSON=${USCIS_CONFIG_JSON:-}
     ports:
       - "8080:8080"
     restart: unless-stopped
