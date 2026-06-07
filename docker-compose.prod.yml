@@ -1,0 +1,21 @@
+services:
+  watcher:
+    image: ghcr.io/elyara/uscis-case-watcher/watcher:latest
+    volumes:
+      - ./output:/app/output
+    environment:
+      - POLL_INTERVAL_MINUTES=60
+      # Paste your config.json contents here as a single-line JSON string.
+      # Alternatively, mount a config.json file:
+      #   - ./config.json:/app/config.json:ro
+      # - USCIS_CONFIG_JSON={"accounts":[{"name":"Your Name","username":"email@example.com","password":"...","totp_secret":"...","cases":[{"case_number":"IOE...","nickname":"My I-485"}]}]}
+    shm_size: "256m"
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/elyara/uscis-case-watcher/web:latest
+    volumes:
+      - ./output:/app/output:ro
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

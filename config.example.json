@@ -8,7 +8,8 @@
       "cases": [
         {
           "case_number": "IOE1234567890",
-          "nickname": "My I-485"
+          "nickname": "My I-485",
+          "archived": false
         }
       ]
     }

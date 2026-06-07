@@ -7,6 +7,7 @@ dependencies = [
     "selenium>=4.0.0",
     "pyotp>=2.8.0",
     "deepdiff>=6.0.0",
+    "flask>=3.0.0",
 ]
 
 [project.scripts]
